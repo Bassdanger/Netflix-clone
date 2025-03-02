@@ -17,7 +17,7 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-      - name: install trivy
+      - name: Install Trivy
         run: |
           #install trivy
           sudo apt-get install wget apt-transport-https gnupg lsb-release -y
@@ -27,3 +27,12 @@ jobs:
           sudo apt-get install trivy -y
           #command to scan files
           trivy fs .
+      - name: Docker build and push
+        run: |
+          #run commands to build and push docker images
+          docker build --build-arg TMDB_V3_API_KEY=d172688caf4f374ff2a7515a41af1dba -t netflix .
+          docker tag netflix jourdancallahan8/netflix:latest
+          docker login -u ${{ secrets.DOCKERHUB_USERNAME }} -p ${{ secrets.DOCKERHUB_TOKEN }}
+          docker push jourdancallahan8/netflix:latest
+        env:
+          DOCKER_CLI_ACI: 1
