@@ -1,63 +1,61 @@
-name: Build,Analyze,scan
+name: Build, Analyze, and Deploy
+
 on:
   push:
     branches:
       - main
+
 jobs:
   build-analyze-scan:
-    name: Build
+    name: Build and Analyze
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
         with:
-          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+          fetch-depth: 0  # Ensure a full repository history for better analysis
+
       - name: Build and analyze with SonarQube
         uses: sonarsource/sonarqube-scan-action@master
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-      - name: Install Trivy
-        run: |
-          #install trivy
-          sudo apt-get install wget apt-transport-https gnupg lsb-release -y
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install trivy -y
-          #command to scan files
-          trivy fs .
+
+      - name: Install and Run Trivy for File Scanning
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+
       - name: Docker Login
-        # You may pin to the exact commit or the version.
-        # uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567
         uses: docker/login-action@v3.3.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Docker build and push
+
+      - name: Build and Push Docker Image
         run: |
-          #run commands to build and push docker images
           docker build --build-arg TMDB_V3_API_KEY=d172688caf4f374ff2a7515a41af1dba -t netflix .
           docker tag netflix jourdancallahan8/netflix:latest
-          # docker login -u ${{ secrets.DOCKERHUB_USERNAME }}
           docker push jourdancallahan8/netflix:latest
         env:
           DOCKER_CLI_ACI: 1
+
   deploy:
     needs: build-analyze-scan
     runs-on: [aws-netflix]
     steps:
-      - name: Pull the docker image
+      - name: Pull Docker Image
         run: docker pull jourdancallahan8/netflix:latest
-      - name: install trivy
+
+      - name: Run Trivy Image Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'image'
+          scan-ref: 'jourdancallahan8/netflix:latest'
+
+      - name: Deploy Netflix Container
         run: |
-          #install trivy
-          sudo apt-get install wget apt-transport-https gnupg lsb-release -y
-          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
-          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee -a /etc/apt/sources.list.d/trivy.list
-          sudo apt-get update
-          sudo apt-get install trivy -y
-      - name: Trivy image scan
-        run: trivy image jourdancallahan8/netflix:latest
-      - name: Run the container netflix
-        run: docker run -d --name netflix -p 8081:80 jourdancallahan8/netflix:latest
+          docker stop netflix || true  # Stop the existing container if running
+          docker rm netflix || true  # Remove the container if it exists
+          docker run -d --name netflix -p 8081:80 jourdancallahan8/netflix:latest
